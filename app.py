@@ -67,3 +67,4 @@ if ticker:
     except Exception as e:
         st.error("⚠️ Could not fetch financials — check the ticker or try again.")
 
+
