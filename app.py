@@ -1,43 +1,69 @@
 import streamlit as st
+import yfinance as yf
 
-st.set_page_config(page_title="Valuation App", layout="centered")
+st.set_page_config(page_title="Auto DCF Valuation", layout="centered")
 
-st.title("💰 M&A Valuation Calculator")
+st.title("📊 Public Company DCF Valuation Tool")
 
-st.header("📊 Step 1: Company Financials")
+ticker = st.text_input("Enter a stock ticker (e.g. AAPL, MSFT, TSLA):")
 
-revenue = st.number_input("Revenue ($ millions)", min_value=0.0, value=100.0)
-ebitda = st.number_input("EBITDA ($ millions)", min_value=0.0, value=20.0)
-net_debt = st.number_input("Net Debt ($ millions)", min_value=0.0, value=10.0)
-shares_outstanding = st.number_input("Shares Outstanding (millions)", min_value=0.01, value=50.0)
+if ticker:
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
 
-st.divider()
+        st.subheader(f"🔍 {info.get('longName', 'Company')} ({ticker.upper()})")
 
-st.header("📈 Step 2: Comparable Multiples")
+        # Financial data
+        revenue = info.get("totalRevenue", 0)
+        ebitda = info.get("ebitda", 0)
+        cash = info.get("totalCash", 0)
+        debt = info.get("totalDebt", 0)
+        shares = info.get("sharesOutstanding", 1)
 
-ev_revenue_multiple = st.number_input("EV / Revenue Multiple", min_value=0.0, value=3.0)
-ev_ebitda_multiple = st.number_input("EV / EBITDA Multiple", min_value=0.0, value=10.0)
+        st.markdown("### 📥 Pulled Financials (TTM)")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Revenue", f"${revenue / 1e9:.2f}B")
+            st.metric("EBITDA", f"${ebitda / 1e9:.2f}B")
+        with col2:
+            st.metric("Cash", f"${cash / 1e9:.2f}B")
+            st.metric("Total Debt", f"${debt / 1e9:.2f}B")
 
-st.divider()
+        st.divider()
 
-st.header("📋 Step 3: Valuation Output")
+        st.markdown("### 🧮 DCF Inputs (Editable)")
 
-# Calculate implied enterprise values
-ev_from_revenue = ev_revenue_multiple * revenue
-ev_from_ebitda = ev_ebitda_multiple * ebitda
+        # Pre-fill with reasonable assumptions
+        fcf = ebitda * 0.7 if ebitda else 0  # Est. 70% of EBITDA as FCF
+        fcf_year1 = st.number_input("Year 1 Free Cash Flow ($M)", value=round(fcf / 1e6, 2))
+        growth_rate = st.slider("Annual FCF Growth Rate (%)", 0.0, 20.0, 5.0)
+        discount_rate = st.slider("Discount Rate (%)", 5.0, 15.0, 10.0)
+        terminal_multiple = st.slider("Terminal EV/FCF Multiple", 5.0, 25.0, 12.0)
 
-# Average enterprise value
-avg_ev = (ev_from_revenue + ev_from_ebitda) / 2
+        st.divider()
 
-# Equity value = EV - Net Debt
-equity_value = avg_ev - net_debt
-price_per_share = equity_value / shares_outstanding
+        # DCF Calculation (5-year forecast)
+        years = [1, 2, 3, 4, 5]
+        fcfs = [fcf_year1 * ((1 + growth_rate / 100) ** i) for i in years]
+        discount_factors = [(1 + discount_rate / 100) ** i for i in years]
+        discounted_fcfs = [fcfs[i] / discount_factors[i] for i in range(5)]
 
-# Show results
-st.subheader("📍 Implied Valuation")
-st.metric("Average Enterprise Value", f"${avg_ev:,.1f}M")
-st.metric("Equity Value", f"${equity_value:,.1f}M")
-st.metric("Price per Share", f"${price_per_share:,.2f}")
+        # Terminal Value
+        terminal_value = fcfs[-1] * terminal_multiple
+        discounted_terminal = terminal_value / discount_factors[-1]
 
-st.caption("🔎 Based on selected multiples and financials")
+        enterprise_value = sum(discounted_fcfs) + discounted_terminal
+        equity_value = enterprise_value - (debt / 1e6) + (cash / 1e6)
+        price_per_share = equity_value * 1e6 / shares if shares else 0
+
+        st.markdown("### 📈 DCF Valuation Output")
+        st.metric("Enterprise Value", f"${enterprise_value:,.1f}M")
+        st.metric("Equity Value", f"${equity_value:,.1f}M")
+        st.metric("Implied Price per Share", f"${price_per_share:,.2f}")
+
+        st.caption("📌 Based on estimated FCF from EBITDA and your input assumptions.")
+
+    except Exception as e:
+        st.error("⚠️ Could not fetch financials — check the ticker or try again.")
 
